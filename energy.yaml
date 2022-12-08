@@ -6,41 +6,42 @@
 # © Klaas Schoute
 #
 substitutions:
-  device_name: home-assistant-glow
+  device_name: energy
   friendly_name: House
-  project_version: "3.1.0"
-  device_description: "Measure your energy consumption with the pulse LED on your smart meter"
+  project_version: "1.0.0"
+  device_description: "Measure your electricity consumption with the pulse LED on your smart meter and gas consumption with reed contact on your gas meter"
 
   # Define the GPIO pins
-  pulse_pin: GPIO13
-  status_led: GPIO5
-  led_pin_red: GPIO2
-  led_pin_green: GPIO4
+  pulse_pin_gas: GPIO5          #D1
+  pulse_pin_electricity: GPIO4  #D2
+  status_led: GPIO2             #D4 onboard LED
+  led_pin_electricity: GPIO14   #D5
+  led_pin_gas: GPIO13           #D7
 
   # Webserver credentials ⬇ #
-  web_username: 'glow'
+  web_username: 'energy'
   web_password: 'esphome'
 
 dashboard_import:
-  package_import_url: github://klaasnicolaas/home-assistant-glow/home_assistant_glow.yaml
+  package_import_url: github://akula3/energy/energy.yaml
 
 esphome:
   name: '${device_name}'
   comment: '${device_description}'
   project:
-    name: "klaasnicolaas.home-assistant-glow"
+    name: "akula3.energy"
     version: "${project_version}"
 
 # Choose the right Platform
 # esp32: https://esphome.io/components/esp32.html
 # esp8266: https://esphome.io/components/esp8266.html
-esp32:
-  board: nodemcu-32s
+esp8266:
+  board: d1_mini
 
 # WiFi credentials #
 wifi:
-  # ssid: 'CHANGEME'
-  # password: 'CHANGEME'
+  ssid: !secret wifi_ssid       # Enter your WiFi SSID here. Example: `ssid: 'your_network_name'`
+  password: !secret wifi_password   # Enter your wifi password here. Example: `password: 'abcde123456'`
 
   # Enable fallback hotspot (captive portal) in case wifi connection fails
   ap:
@@ -56,6 +57,8 @@ improv_serial:
 
 # Enable Home Assistant API
 api:
+  encryption:
+    key: !secret api_encryption_key
   services:
     - service: reset_total_energy
       then:
@@ -63,6 +66,7 @@ api:
             id: button_reset_total
 
 ota:
+  password: !secret ota_password
   safe_mode: true
   reboot_timeout: 10min
   num_attempts: 5
@@ -87,22 +91,12 @@ number:
     initial_value: 1000
 
 output:
-  # - platform: gpio
-  #   pin: GPIO5
-  #   id: output_blue
   - platform: gpio
-    pin: ${led_pin_red}
-    id: output_red
+    pin: ${led_pin_electricity}
+    id: output_electricity
   - platform: gpio
-    pin: ${led_pin_green}
-    id: output_green
-
-light:
-  - platform: binary
-    internal: true
-    id: led_red
-    name: Red
-    output: output_red
+    pin: ${led_pin_gas}
+    id: output_gas
 
 # Status LED for connection
 status_led:
@@ -113,22 +107,22 @@ status_led:
 button:
   # Restart the ESP
   - platform: restart
-    name: "Restart - Glow"
+    name: "Restart - Energy"
   # Reset the total energy entity
   - platform: template
     name: "Reset - Total Energy"
     id: button_reset_total
     on_press:
       - pulse_meter.set_total_pulses:
-          id: sensor_energy_pulse_meter
+          id: sensor_electricity_pulse_meter
           value: 0
 
 # Sensors for ESP version and WIFI information
 text_sensor:
   # Installed version
   - platform: template
-    name: "Glow - Installed version"
-    id: glow_version
+    name: "Energy - Installed version"
+    id: energy_version
     icon: "mdi:label-outline"
     entity_category: diagnostic
     lambda: |-
@@ -147,6 +141,31 @@ text_sensor:
       name: '${friendly_name} - Connected SSID'
       icon: mdi:wifi-strength-2
 
+# START Gasverbrauch
+globals:
+  - id: total_pulses
+    type: int
+    restore_value: false
+    initial_value: '0'  # hier kann der Gaszählerstand initialisiert werden
+
+binary_sensor:
+  - platform: gpio
+    id: internal_pulse_counter
+    pin:
+      number: ${pulse_pin_gas}
+      mode: INPUT_PULLUP
+    name: "Gas Live-Impuls"
+    filters:
+      - delayed_on: 10ms
+    on_press:
+      then:
+        - lambda: id(total_pulses) += 1;
+        - output.turn_off: output_gas  # optional: für eine LED, die den Gaszählerpuls visualisiert
+    on_release:
+      then:
+        - output.turn_on: output_gas  # optional: für eine LED, die den Gaszählerpuls visualisiert
+# END Gasverbrauch
+
 sensor:
   # WiFi signal
   - platform: wifi_signal
@@ -156,21 +175,19 @@ sensor:
   # Pulse meter
   - platform: pulse_meter
     name: '${friendly_name} - Power Consumption'
-    id: sensor_energy_pulse_meter
+    id: sensor_electricity_pulse_meter
     unit_of_measurement: 'W'
     state_class: measurement
     device_class: power
     icon: mdi:flash-outline
     accuracy_decimals: 0
-    pin: ${pulse_pin}
+    pin: ${pulse_pin_electricity}
     # internal_filter: 100ms
     on_value:
       then:
-        - light.turn_on:
-            id: led_red
+        - output.turn_on: output_electricity
         - delay: 0.5s
-        - light.turn_off:
-            id: led_red
+        - output.turn_off: output_electricity
     filters:
       # multiply value = (60 / imp value) * 1000
       # - multiply: 60
@@ -191,7 +208,7 @@ sensor:
   - platform: total_daily_energy
     name: '${friendly_name} - Daily Energy'
     id: sensor_total_daily_energy
-    power_id: sensor_energy_pulse_meter
+    power_id: sensor_electricity_pulse_meter
     unit_of_measurement: 'kWh'
     icon: mdi:circle-slice-3
     state_class: total_increasing
@@ -200,6 +217,18 @@ sensor:
     filters:
       # Multiplication factor from W to kW is 0.001
       - multiply: 0.001
+
+  # START Gasverbrauch
+  - platform: template
+    name: "Gasverbrauch"
+    device_class: gas
+    unit_of_measurement: "m³"
+    state_class: "total_increasing"
+    icon: "mdi:fire"
+    accuracy_decimals: 2
+    lambda: |-
+      return id(total_pulses) * 0.01;
+  # END Gasverbrauch
 
 # Enable time component to reset energy at midnight
 # https://esphome.io/components/time.html#home-assistant-time-source
