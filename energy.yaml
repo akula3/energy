@@ -154,6 +154,7 @@ binary_sensor:
     pin:
       number: ${pulse_pin_gas}
       mode: INPUT_PULLUP
+      inverted: true
     name: "Gas Live-Impuls"
     filters:
       - delayed_on: 10ms
