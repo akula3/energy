@@ -88,7 +88,7 @@ number:
     max_value: 10000
     step: 100
     restore_value: yes
-    initial_value: 1000
+    initial_value: 500
 
 output:
   - platform: gpio
