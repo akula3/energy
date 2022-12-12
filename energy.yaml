@@ -15,7 +15,7 @@ substitutions:
   pulse_pin_gas: GPIO5          #D1
   pulse_pin_electricity: GPIO4  #D2
   status_led: GPIO2             #D4 onboard LED
-  led_pin_electricity: GPIO14   #D5
+  led_pin_electricity: GPIO12   #D6
   led_pin_gas: GPIO13           #D7
 
   # Webserver credentials ⬇ #
