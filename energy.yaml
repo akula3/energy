@@ -7,8 +7,8 @@
 #
 substitutions:
   device_name: energy
-  friendly_name: House
-  project_version: "1.0.0"
+  friendly_name: Verbrauch
+  project_version: "1.2.0"
   device_description: "Measure your electricity consumption with the pulse LED on your smart meter and gas consumption with reed contact on your gas meter"
 
   # Define the GPIO pins
@@ -20,7 +20,7 @@ substitutions:
 
   # Webserver credentials ⬇ #
   web_username: 'energy'
-  web_password: 'esphome'
+  web_password: !secret web_password
 
 dashboard_import:
   package_import_url: github://akula3/energy/energy.yaml
@@ -59,11 +59,11 @@ improv_serial:
 api:
   encryption:
     key: !secret api_encryption_key
-  services:
-    - service: reset_total_energy
-      then:
-        - button.press:
-            id: button_reset_total
+#  services:
+#    - service: reset_total_energy
+#      then:
+#        - button.press:
+#            id: button_reset_total
 
 ota:
   password: !secret ota_password
@@ -77,18 +77,29 @@ web_server:
     username: '${web_username}'
     password: '${web_password}'
 
-number:
-  # Select the correct pulse rate for your meter
+# Sensors for ESP version and WIFI information
+text_sensor:
+  # Installed version
   - platform: template
-    id: select_pulse_rate
-    name: 'Puls rate - imp/kWh'
-    optimistic: true
-    mode: box
-    min_value: 100
-    max_value: 10000
-    step: 100
-    restore_value: yes
-    initial_value: 500
+    name: "${device_name} - Installed version"
+    id: energy_version
+    icon: "mdi:label-outline"
+    entity_category: diagnostic
+    lambda: |-
+      return {"${project_version}"};
+    update_interval: 10min
+  # ESPHome version
+  - platform: version
+    hide_timestamp: true
+    name: '$${device_name} - ESPHome Version'
+  # IP address and connected SSID
+  - platform: wifi_info
+    ip_address:
+      name: '$${device_name} - IP Address'
+      icon: mdi:wifi
+    ssid:
+      name: '$${device_name} - Connected SSID'
+      icon: mdi:wifi-strength-2
 
 output:
   - platform: gpio
@@ -107,50 +118,50 @@ status_led:
 button:
   # Restart the ESP
   - platform: restart
-    name: "Restart - Energy"
+    name: "Restart ${friendly_name} Device"
   # Reset the total energy entity
-  - platform: template
-    name: "Reset - Total Energy"
-    id: button_reset_total
-    on_press:
-      - pulse_meter.set_total_pulses:
-          id: sensor_electricity_pulse_meter
-          value: 0
+#  - platform: template
+#    name: "Reset - Total Energy"
+#    id: button_reset_total
+#    on_press:
+#      - pulse_meter.set_total_pulses:
+#          id: sensor_electricity_pulse_meter
+#          value: 0
 
-# Sensors for ESP version and WIFI information
-text_sensor:
-  # Installed version
-  - platform: template
-    name: "Energy - Installed version"
-    id: energy_version
-    icon: "mdi:label-outline"
-    entity_category: diagnostic
-    lambda: |-
-      return {"${project_version}"};
-    update_interval: 6h
-  # ESPHome version
-  - platform: version
-    hide_timestamp: true
-    name: '${friendly_name} - ESPHome Version'
-  # IP address and connected SSID
-  - platform: wifi_info
-    ip_address:
-      name: '${friendly_name} - IP Address'
-      icon: mdi:wifi
-    ssid:
-      name: '${friendly_name} - Connected SSID'
-      icon: mdi:wifi-strength-2
-
-# START Gasverbrauch
+  # # Electricity pulse rate, imp/kWh
+  # electricity_pulse_rate: '500'
+  # # Gas Puls rate, imp/m³
+  # gas_pulse_rate: '100'
+  
 globals:
-  - id: total_pulses
+# Electricity pulse rate, imp/kWh
+  - id: electricity_pulse_rate
     type: int
-    restore_value: false
-    initial_value: '0'  # hier kann der Gaszählerstand initialisiert werden
+    restore_value: true
+    initial_value: '500'
+# Gas Puls rate, imp/m³
+  - id: gas_pulse_rate
+    type: int
+    restore_value: true
+    initial_value: '100'
 
 binary_sensor:
   - platform: gpio
-    id: internal_pulse_counter
+    id: internal_pulse_counter_electricity
+    pin:
+      number: ${pulse_pin_electricity}
+      inverted: true
+    name: "Strom Live-Impuls"
+    filters:
+      - delayed_on: 10ms
+    on_press:
+      then:
+        - output.turn_on: output_electricity
+    on_release:
+      then:
+        - output.turn_off: output_electricity
+  - platform: gpio
+    id: internal_pulse_counter_gas
     pin:
       number: ${pulse_pin_gas}
       mode: INPUT_PULLUP
@@ -160,11 +171,42 @@ binary_sensor:
       - delayed_on: 10ms
     on_press:
       then:
-        - lambda: id(total_pulses) += 1;
-        - output.turn_off: output_gas  # optional: für eine LED, die den Gaszählerpuls visualisiert
+        - output.turn_off: output_gas
     on_release:
       then:
-        - output.turn_on: output_gas  # optional: für eine LED, die den Gaszählerpuls visualisiert
+        - output.turn_on: output_gas
+
+#number:
+#  # Set the correct value shown on your meter
+#  - platform: template
+#    id: electricity_at_meter
+#    name: 'Strom Zählerstand'
+#    unit_of_measurement: 'x..x, kWh'
+#    icon: mdi:meter-electric
+#    optimistic: true
+#    mode: box
+#    min_value: 0
+#    max_value: 999999.999
+#    step: 0.002
+#    restore_value: yes
+#  - platform: template
+#    id: gas_at_meter
+#    name: 'Gas Zählerstand'
+#    unit_of_measurement: 'x..x.xx, m³'
+#    icon: mdi:meter-gas
+#    optimistic: true
+#    mode: box
+#    min_value: 0
+#    max_value: 99999.99
+#    step: 0.01
+#    restore_value: yes
+
+# START Gasverbrauch
+#globals:
+#  - id: gas_total_pulses
+#    type: int
+#    restore_value: false
+#    initial_value: '0'  # hier kann der Gaszählerstand initialisiert werden
 # END Gasverbrauch
 
 sensor:
@@ -173,9 +215,9 @@ sensor:
     name: "${friendly_name} - WiFi Signal"
     update_interval: 120s
 
-  # Pulse meter
+  # Electricity Pulse meter
   - platform: pulse_meter
-    name: '${friendly_name} - Power Consumption'
+    name: 'Strom ${friendly_name}'
     id: sensor_electricity_pulse_meter
     unit_of_measurement: 'W'
     state_class: measurement
@@ -184,18 +226,19 @@ sensor:
     accuracy_decimals: 0
     pin: ${pulse_pin_electricity}
     # internal_filter: 100ms
-    on_value:
-      then:
-        - output.turn_on: output_electricity
-        - delay: 0.5s
-        - output.turn_off: output_electricity
+#    on_value:
+#      then:
+#        - output.turn_on: output_electricity
+#        - delay: 0.5s
+#        - output.turn_off: output_electricity
     filters:
       # multiply value = (60 / imp value) * 1000
       # - multiply: 60
-      - lambda: return x * ((60.0 / id(select_pulse_rate).state) * 1000.0);
+      - lambda: |-
+          return x * ((60.0 / id(electricity_pulse_rate)) * 1000.0);
     total:
-      name: '${friendly_name} - Total Energy'
-      id: sensor_total_energy
+      name: 'Strom ${friendly_name} gesamt'
+      id: sensor_electricity_total_energy
       unit_of_measurement: 'kWh'
       icon: mdi:circle-slice-3
       state_class: total_increasing
@@ -204,19 +247,54 @@ sensor:
       filters:
         # multiply value = 1 / imp value
         # - multiply: 0.001
-        - lambda: return x * (1.0 / id(select_pulse_rate).state);
+        - lambda: |-
+            return x * (1.0 / id(electricity_pulse_rate));
 
-  # START Gasverbrauch
-  - platform: template
-    name: "Gasverbrauch"
+  # Gas Pulse meter
+  - platform: pulse_meter
+    name: 'Gas ${friendly_name}'
+    id: sensor_gas_pulse_meter
+    unit_of_measurement: 'm³'
+    state_class: measurement
     device_class: gas
-    unit_of_measurement: "m³"
-    state_class: "total_increasing"
-    icon: "mdi:fire"
+    icon: mdi:fire
     accuracy_decimals: 2
-    lambda: |-
-      return id(total_pulses) * 0.01;
-  # END Gasverbrauch
+    pin: ${pulse_pin_gas}
+    # internal_filter: 100ms
+#    on_value:
+#      then:
+#        - output.turn_on: output_electricity
+#        - delay: 0.5s
+#        - output.turn_off: output_electricity
+    filters:
+      # multiply value = (60 / imp value) * 1000
+      # - multiply: 60
+      - lambda: |-
+          return x * (60.0 / id(gas_pulse_rate));
+    total:
+      name: 'Gas ${friendly_name} gesamt'
+      id: sensor_gas_total_energy
+      unit_of_measurement: 'm³'
+      icon: mdi:circle-slice-3
+      state_class: total_increasing
+      device_class: energy
+      accuracy_decimals: 2
+      filters:
+        # multiply value = 1 / imp value
+        # - multiply: 0.001
+        - lambda: |-
+            return x * (1.0 / id(gas_pulse_rate));
+
+#  # Gas Pulse meter
+#  - platform: template
+#    name: "Gas ${friendly_name}"
+#    device_class: gas
+#    unit_of_measurement: "m³"
+#    state_class: "total_increasing"
+#    icon: "mdi:fire"
+#    accuracy_decimals: 2
+#    lambda: |-
+#      return id(gas_total_pulses) * 0.01;
 
 # Enable time component to reset energy at midnight
 # https://esphome.io/components/time.html#home-assistant-time-source
